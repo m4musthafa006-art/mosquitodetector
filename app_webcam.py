@@ -8,15 +8,6 @@ import numpy as np
 from datetime import datetime
 import io
 
-# Move webcam imports to top level
-try:
-    import av
-    from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, WebRtcMode
-    WEBRTC_AVAILABLE = True
-except ImportError:
-    WEBRTC_AVAILABLE = False
-    st.warning("⚠️ streamlit-webrtc not installed. Webcam mode will not be available.")
-
 # Initialize session state for dark mode
 if 'dark_mode' not in st.session_state:
     st.session_state.dark_mode = True
@@ -425,7 +416,7 @@ with st.sidebar:
     # Detection mode
     mode = st.selectbox(
         "🎯 Detection Mode",
-        ["📷 Image Upload", "🎥 Webcam Live"],
+        ["📷 Image Upload", "📸 Camera"],
         index=0
     )
     
@@ -554,119 +545,113 @@ if mode == "📷 Image Upload":
         st.markdown('</div>', unsafe_allow_html=True)
         st.info("👆 Upload an image to begin detection")
 
-elif mode == "🎥 Webcam Live":
+elif mode == "📸 Camera":
     
     st.markdown('<div class="upload-container">', unsafe_allow_html=True)
-    st.header("🎥 Live Mosquito Detection")
-    st.write("Real-time mosquito detection using your webcam")
+    st.header("📸 Capture from Camera")
+    st.write("Take a photo using your camera to detect mosquitoes")
     
+    camera_image = st.camera_input("Take a photo")
     
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Check if streamlit-webrtc is available
-    if not WEBRTC_AVAILABLE:
-        st.markdown("""
-        <div class="warning-box">
-            <h2 style="margin: 0;">⚠️ Webcam Mode Not Available</h2>
-            <p style="margin: 0.5rem 0;">streamlit-webrtc is not installed.</p>
-            <p style="margin: 0.5rem 0; font-size: 0.9rem;">Install it with: pip install streamlit-webrtc</p>
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        try:
-            class VideoProcessor(VideoProcessorBase):
-                
-                def __init__(self):
-                    super().__init__()
-                    self.detection_count = 0
-                    self.frame_count = 0
-                
-                def recv(self, frame):
-                    try:
-                        img = frame.to_ndarray(format="bgr24")
-                        
-                        # Simple detection without enhancement for reliability
-                        results = model(img, verbose=False)
-                        
-                        count = len(results[0].boxes)
-                        self.detection_count = count
-                        self.frame_count += 1
-                        
-                        # Debug output - show detections every frame
-                        print(f"Frame {self.frame_count}: Detections = {count}")
-                        
-                        # Session-based updates removed; keep local counters
-                        # (self.detection_count already updated above)
-                        
-                        # Always show annotations for debugging
-                        annotated = results[0].plot()
-                        
-                        return av.VideoFrame.from_ndarray(
-                            annotated,
-                            format="bgr24"
-                        )
-                    except Exception as e:
-                        print(f"Error in video processing: {e}")
-                        import traceback
-                        traceback.print_exc()
-                        # Return original frame if processing fails
-                        return frame
+    if camera_image is not None:
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("📷 Captured Photo")
+            image = Image.open(camera_image)
+            st.image(image, caption="Captured Image", use_container_width=True)
+        
+        with col2:
+            st.subheader("🔍 Detection Result")
             
-            webrtc_ctx = webrtc_streamer(
-                key="mosquito-camera",
-                video_processor_factory=VideoProcessor,
-                media_stream_constraints={"video": True, "audio": False},
-                mode=WebRtcMode.SENDRECV
+            with st.spinner("🔄 Analyzing image..."):
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
+                    image.save(tmp.name)
+                    
+                    results = model(tmp.name, conf=confidence_threshold)
+                    
+                    annotated = results[0].plot()
+                    
+                    count = len(results[0].boxes)
+
+                    time.sleep(0.3)
+            
+            st.image(
+                annotated,
+                caption="Detection Result",
+                use_container_width=True
             )
             
-            if webrtc_ctx.state.playing:
-                st.markdown('<div class="info-box">', unsafe_allow_html=True)
-                st.info("🎥 Camera is active. Mosquitoes will be detected in real-time.")
-                st.markdown('</div>', unsafe_allow_html=True)
-                
-                # Detection is shown directly on the video feed with bounding boxes
-                st.markdown('<div class="detection-result">', unsafe_allow_html=True)
-                st.subheader("📊 Detection Information")
-                st.markdown("""
-                <p style="font-size: 1.1rem;">🦟 <strong>Detection Status:</strong> Look at the video feed above.</p>
-                <p style="font-size: 1rem; color: #666;">Mosquitoes will appear with bounding boxes and confidence scores in real-time.</p>
-                <p style="font-size: 0.9rem; color: #888;">The detection happens directly on the video stream - check the video feed for results.</p>
-                """, unsafe_allow_html=True)
-                st.markdown('</div>', unsafe_allow_html=True)
-                
-                # Add tips for webcam mode
-                st.markdown('<div class="detection-result">', unsafe_allow_html=True)
-                st.subheader("💡 Tips for Better Detection")
-                st.markdown("""
-                - Ensure good lighting in the room
-                - Hold the camera steady
-                - Allow camera permissions when prompted
-                """)
-                st.markdown('</div>', unsafe_allow_html=True)
-            else:
-                st.markdown('<div class="warning-box">', unsafe_allow_html=True)
-                st.warning("⚠️ Click 'Start' to begin live detection")
-                st.markdown('</div>', unsafe_allow_html=True)
-                
-                # Add troubleshooting info
-                st.markdown('<div class="detection-result">', unsafe_allow_html=True)
-                st.subheader("🔧 Troubleshooting")
-                st.markdown("""
-                - Make sure your browser allows camera access
-                - Try using Chrome or Firefox for best compatibility
-                - Check if another application is using your camera
-                - Refresh the page if the camera doesn't start
-                """)
-                st.markdown('</div>', unsafe_allow_html=True)
-                
-        except Exception as e:
+            annotated_pil = Image.fromarray(annotated)
+            buf = io.BytesIO()
+            annotated_pil.save(buf, format="PNG")
+            buf.seek(0)
+            
+            st.download_button(
+                label="📥 Download Result",
+                data=buf,
+                file_name=f"mosquito_detection_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png",
+                mime="image/png"
+            )
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        if count > 0:
             st.markdown(f"""
-            <div class="warning-box">
-                <h2 style="margin: 0;">⚠️ Webcam Error</h2>
-                <p style="margin: 0.5rem 0;">Error: {str(e)}</p>
-                <p style="margin: 0.5rem 0; font-size: 0.9rem;">Please check your camera permissions and try again.</p>
+            <div class="success-box">
+                <h2 style="margin: 0;">✅ Detection Complete</h2>
+                <p style="font-size: 1.5rem; margin: 0.5rem 0;">Mosquitoes Detected: <strong>{count}</strong></p>
             </div>
             """, unsafe_allow_html=True)
+            
+            if len(results[0].boxes) > 0:
+                st.markdown('<div class="detection-result">', unsafe_allow_html=True)
+                st.subheader("📈 Detection Details")
+                
+                confidences = results[0].boxes.conf.cpu().numpy()
+                avg_confidence = (confidences.mean() * 100).round(2)
+                
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.metric("Total Detected", count)
+                with col2:
+                    st.metric("Avg Confidence", f"{avg_confidence}%")
+                with col3:
+                    st.metric("Max Confidence", f"{(confidences.max() * 100).round(2)}%")
+                
+                st.markdown('</div>', unsafe_allow_html=True)
+                
+                st.markdown('<div class="detection-result">', unsafe_allow_html=True)
+                st.subheader("📍 Detection Coordinates")
+                
+                boxes = results[0].boxes
+                detection_data = []
+                
+                for i, box in enumerate(boxes):
+                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                    conf = box.conf[0].cpu().numpy()
+                    detection_data.append({
+                        "ID": i + 1,
+                        "X1": round(x1, 2),
+                        "Y1": round(y1, 2),
+                        "X2": round(x2, 2),
+                        "Y2": round(y2, 2),
+                        "Confidence": f"{(conf * 100):.2f}%"
+                    })
+                
+                st.dataframe(detection_data, use_container_width=True)
+                st.markdown('</div>', unsafe_allow_html=True)
+        else:
+            st.markdown("""
+            <div class="info-box">
+                <h2 style="margin: 0;">ℹ️ No Mosquitoes Detected</h2>
+                <p style="margin: 0.5rem 0;">The image appears to be clear of mosquitoes.</p>
+            </div>
+            """, unsafe_allow_html=True)
+    else:
+        st.markdown('</div>', unsafe_allow_html=True)
+        st.info("👆 Take a photo to begin detection")
 
 # Footer
 st.markdown("""
