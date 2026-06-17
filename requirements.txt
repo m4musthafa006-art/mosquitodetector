@@ -4,6 +4,5 @@ torch
 torchvision
 pillow
 numpy
-opencv-python-headless
 av
 streamlit-webrtc
