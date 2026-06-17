@@ -6,12 +6,18 @@ import time
 import numpy as np
 from datetime import datetime
 import io
+import os
 
-# Initialize session state for dark mode
+try:
+    import av
+    from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, WebRtcMode
+    WEBRTC_AVAILABLE = True
+except ImportError:
+    WEBRTC_AVAILABLE = False
+
+# Initialize session state
 if 'dark_mode' not in st.session_state:
     st.session_state.dark_mode = True
-if 'cam_key' not in st.session_state:
-    st.session_state.cam_key = 0
 
 def play_beep():
     sample_rate = 8000
@@ -20,6 +26,15 @@ def play_beep():
     tone = np.sin(2 * np.pi * 880 * t) * 0.5
     beep_data = (tone * 32767).astype(np.int16)
     st.audio(beep_data, sample_rate=sample_rate)
+
+def get_ice_servers():
+    servers = [{"urls": ["stun:stun.l.google.com:19302"]}]
+    turn_url = os.environ.get("TURN_URL", "")
+    turn_user = os.environ.get("TURN_USERNAME", "")
+    turn_cred = os.environ.get("TURN_CREDENTIAL", "")
+    if turn_url and turn_user and turn_cred:
+        servers.append({"urls": [turn_url], "username": turn_user, "credential": turn_cred})
+    return {"iceServers": servers}
 
 # Custom CSS for better UI with dark mode support
 def get_css():
@@ -555,49 +570,42 @@ elif mode == "🎥 Live Cam":
     st.markdown("""
         <div style="text-align:center; padding:1rem 0;">
             <h2 style="margin:0;">🎥 Live Detection</h2>
-            <p style="margin:0.5rem 0; opacity:0.8;">Camera shows live preview. Each capture runs instant detection.</p>
+            <p style="margin:0.5rem 0; opacity:0.8;">Real-time mosquito detection with live video feed</p>
         </div>
     """, unsafe_allow_html=True)
-    
-    # Display last result if available
-    if st.session_state.cam_key > 0 and 'last_result' in st.session_state:
-        st.image(st.session_state.last_result, use_container_width=True)
-        if 'last_count' in st.session_state and st.session_state.last_count > 0:
-            play_beep()
-    
-    # Always show fresh camera
-    live_img = st.camera_input("", key=f"cam_{st.session_state.cam_key}")
-    
-    if live_img is not None:
-        image = Image.open(live_img)
-        img_array = np.array(image)
-        
-        results = model(img_array, conf=confidence_threshold)
-        annotated = results[0].plot()
-        count = len(results[0].boxes)
-        
-        st.session_state.last_result = annotated
-        st.session_state.last_count = count
-        
-        if count > 0:
-            st.markdown(f"""
-            <div class="success-box" style="padding:0.8rem;">
-                <h3 style="margin:0;">🦟 {count} detected</h3>
-            </div>
-            """, unsafe_allow_html=True)
-        else:
-            st.markdown("""
-            <div class="info-box" style="padding:0.8rem;">
-                <p style="margin:0;">✅ Clear</p>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        st.session_state.cam_key += 1
-        time.sleep(0.3)
-        st.rerun()
-    
     st.markdown('</div>', unsafe_allow_html=True)
-    st.caption("💡 The camera re-opens automatically after each capture. Just keep tapping to scan rapidly.")
+    
+    if not WEBRTC_AVAILABLE:
+        st.warning("streamlit-webrtc not installed. Install with: pip install streamlit-webrtc av")
+    else:
+        class VideoProcessor(VideoProcessorBase):
+            def __init__(self):
+                super().__init__()
+                self.prev_count = 0
+            
+            def recv(self, frame):
+                img = frame.to_ndarray(format="bgr24")
+                results = model(img, verbose=False)
+                count = len(results[0].boxes)
+                if count > 0 and self.prev_count == 0:
+                    play_beep()
+                self.prev_count = count
+                annotated = results[0].plot()
+                return av.VideoFrame.from_ndarray(annotated, format="bgr24")
+        
+        webrtc_ctx = webrtc_streamer(
+            key="mosquito-cam",
+            video_processor_factory=VideoProcessor,
+            media_stream_constraints={"video": True, "audio": False},
+            rtc_configuration=get_ice_servers(),
+            mode=WebRtcMode.SENDRECV,
+            async_processing=True
+        )
+        
+        if webrtc_ctx.state.playing:
+            st.success("🎥 Live detection active — bounding boxes shown on video feed")
+        else:
+            st.info("👆 Click **Start** to begin live detection")
 
 elif mode == "📸 Camera":
     

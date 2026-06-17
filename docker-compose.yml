@@ -1,0 +1,26 @@
+version: "3.9"
+
+services:
+  turn:
+    image: coturn/coturn:latest
+    restart: unless-stopped
+    network_mode: host
+    command: >
+      -n --min-port=49152 --max-port=65535
+      --listening-port=3478 --tls-listening-port=5349
+      --realm=mosquitodetect.local
+      --lt-cred-mech --user=mosquito:detect123
+      --fingerprint --no-cli
+
+  app:
+    build: .
+    restart: unless-stopped
+    network_mode: host
+    depends_on:
+      - turn
+    environment:
+      - TURN_URL=turn:127.0.0.1:3478
+      - TURN_USERNAME=mosquito
+      - TURN_CREDENTIAL=detect123
+    ports:
+      - "8501:8501"
