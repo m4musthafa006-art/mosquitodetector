@@ -441,7 +441,7 @@ if mode == "📷 Image Upload":
     
     uploaded_file = st.file_uploader(
         "Choose an image file",
-        type=["jpg", "jpeg", "png"],
+        type=["jpg", "jpeg", "png", "jfif", "webp"],
         label_visibility="collapsed"
     )
     
@@ -591,8 +591,7 @@ elif mode == "🎥 Live Cam":
             
             rtc_config = {
                 "iceServers": [
-                    {"urls": ["stun:stun.l.google.com:19302"]},
-                    {"urls": ["turn:openrelayproject.org:3478"]}
+                    {"urls": ["stun:stun.l.google.com:19302"]}
                 ]
             }
             
