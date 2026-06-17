@@ -1,7 +1,6 @@
 import streamlit as st
 from ultralytics import YOLO
 from PIL import Image
-import tempfile
 import cv2
 import time
 import numpy as np
@@ -11,6 +10,16 @@ import io
 # Initialize session state for dark mode
 if 'dark_mode' not in st.session_state:
     st.session_state.dark_mode = True
+if 'cam_key' not in st.session_state:
+    st.session_state.cam_key = 0
+
+def play_beep():
+    sample_rate = 8000
+    duration = 0.25
+    t = np.linspace(0, duration, int(sample_rate * duration), False)
+    tone = np.sin(2 * np.pi * 880 * t) * 0.5
+    beep_data = (tone * 32767).astype(np.int16)
+    st.audio(beep_data, sample_rate=sample_rate)
 
 # Custom CSS for better UI with dark mode support
 def get_css():
@@ -452,16 +461,11 @@ if mode == "📷 Image Upload":
             st.subheader("🔍 Detection Result")
             
             with st.spinner("🔄 Analyzing image..."):
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
-                    image.save(tmp.name)
-                    
-                    results = model(tmp.name, conf=confidence_threshold)
-                    
-                    annotated = results[0].plot()
-                    
-                    count = len(results[0].boxes)
-
-                    time.sleep(0.3)
+                img_array = np.array(image)
+                results = model(img_array, conf=confidence_threshold)
+                annotated = results[0].plot()
+                count = len(results[0].boxes)
+                time.sleep(0.3)
             
             st.image(
                 annotated,
@@ -549,42 +553,41 @@ elif mode == "🎥 Live Cam":
     
     st.markdown('<div class="upload-container">', unsafe_allow_html=True)
     st.header("🎥 Live Mosquito Detection")
-    st.write("Point your camera at a mosquito and tap to detect")
+    st.write("Point your camera and capture. Detection runs instantly on each capture.")
     st.markdown('</div>', unsafe_allow_html=True)
     
-    live_img = st.camera_input("Tap to capture", key="live_cam_capture")
+    live_img = st.camera_input("Capture", key=f"cam_{st.session_state.cam_key}")
     
     if live_img is not None:
         image = Image.open(live_img)
+        img_array = np.array(image)
         
         with st.spinner("🔍 Detecting..."):
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
-                image.save(tmp.name)
-                results = model(tmp.name, conf=confidence_threshold)
-                annotated = results[0].plot()
-                count = len(results[0].boxes)
+            results = model(img_array, conf=confidence_threshold)
+            annotated = results[0].plot()
+            count = len(results[0].boxes)
         
-        st.image(annotated, caption="Detection Result", use_container_width=True)
+        st.image(annotated, use_container_width=True)
         
         if count > 0:
+            play_beep()
             st.markdown(f"""
             <div class="success-box">
-                <h2 style="margin: 0;">✅ Mosquitoes Detected: <strong>{count}</strong></h2>
+                <h2 style="margin: 0;">🦟 Mosquitoes Detected: <strong>{count}</strong></h2>
             </div>
             """, unsafe_allow_html=True)
+            confs = results[0].boxes.conf.cpu().numpy()
+            st.metric("Avg Confidence", f"{(confs.mean() * 100):.1f}%")
         else:
             st.markdown("""
             <div class="info-box">
-                <h2 style="margin: 0;">ℹ️ No Mosquitoes Detected</h2>
+                <h2 style="margin: 0;">✅ No Mosquitoes</h2>
             </div>
             """, unsafe_allow_html=True)
         
-        confidences = results[0].boxes.conf.cpu().numpy() if count > 0 else []
-        if len(confidences) > 0:
-            st.metric("Avg Confidence", f"{(confidences.mean() * 100):.1f}%")
-    
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.caption("💡 Tap the camera button above to capture and detect. Repeat as needed.")
+        if st.button("🔄 Capture Again", use_container_width=True):
+            st.session_state.cam_key += 1
+            st.rerun()
 
 elif mode == "📸 Camera":
     
@@ -606,16 +609,11 @@ elif mode == "📸 Camera":
             st.subheader("🔍 Detection Result")
             
             with st.spinner("🔄 Analyzing image..."):
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
-                    image.save(tmp.name)
-                    
-                    results = model(tmp.name, conf=confidence_threshold)
-                    
-                    annotated = results[0].plot()
-                    
-                    count = len(results[0].boxes)
-
-                    time.sleep(0.3)
+                img_array = np.array(image)
+                results = model(img_array, conf=confidence_threshold)
+                annotated = results[0].plot()
+                count = len(results[0].boxes)
+                time.sleep(0.3)
             
             st.image(
                 annotated,
