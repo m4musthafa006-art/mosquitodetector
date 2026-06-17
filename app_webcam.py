@@ -8,6 +8,13 @@ import numpy as np
 from datetime import datetime
 import io
 
+try:
+    import av
+    from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, WebRtcMode
+    WEBRTC_AVAILABLE = True
+except ImportError:
+    WEBRTC_AVAILABLE = False
+
 # Initialize session state for dark mode
 if 'dark_mode' not in st.session_state:
     st.session_state.dark_mode = True
@@ -416,7 +423,7 @@ with st.sidebar:
     # Detection mode
     mode = st.selectbox(
         "🎯 Detection Mode",
-        ["📷 Image Upload", "📸 Camera"],
+        ["📷 Image Upload", "🎥 Live Cam", "📸 Camera"],
         index=0
     )
     
@@ -544,6 +551,70 @@ if mode == "📷 Image Upload":
     else:
         st.markdown('</div>', unsafe_allow_html=True)
         st.info("👆 Upload an image to begin detection")
+
+elif mode == "🎥 Live Cam":
+    
+    st.markdown('<div class="upload-container">', unsafe_allow_html=True)
+    st.header("🎥 Live Mosquito Detection")
+    st.write("Real-time mosquito detection using your webcam")
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    if not WEBRTC_AVAILABLE:
+        st.markdown("""
+        <div class="warning-box">
+            <h2 style="margin: 0;">⚠️ Webcam Mode Not Available</h2>
+            <p style="margin: 0.5rem 0;">streamlit-webrtc is not installed.</p>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        try:
+            class VideoProcessor(VideoProcessorBase):
+                def __init__(self):
+                    super().__init__()
+                    self.detection_count = 0
+                    self.frame_count = 0
+                
+                def recv(self, frame):
+                    try:
+                        img = frame.to_ndarray(format="bgr24")
+                        results = model(img, verbose=False)
+                        count = len(results[0].boxes)
+                        self.detection_count = count
+                        self.frame_count += 1
+                        annotated = results[0].plot()
+                        return av.VideoFrame.from_ndarray(annotated, format="bgr24")
+                    except Exception as e:
+                        print(f"Error in video processing: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        return frame
+            
+            rtc_config = {
+                "iceServers": [
+                    {"urls": ["stun:stun.l.google.com:19302"]},
+                    {"urls": ["turn:openrelayproject.org:3478"]}
+                ]
+            }
+            
+            webrtc_ctx = webrtc_streamer(
+                key="mosquito-camera",
+                video_processor_factory=VideoProcessor,
+                media_stream_constraints={"video": True, "audio": False},
+                rtc_configuration=rtc_config,
+                mode=WebRtcMode.SENDRECV
+            )
+            
+            if webrtc_ctx.state.playing:
+                st.markdown("""
+                <div class="info-box">
+                    <p style="font-size: 1.1rem;">🎥 Camera is active. Detection running in real-time.</p>
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.warning("⚠️ Click 'Start' to begin live detection")
+                
+        except Exception as e:
+            st.error(f"⚠️ Webcam Error: {str(e)}")
 
 elif mode == "📸 Camera":
     
