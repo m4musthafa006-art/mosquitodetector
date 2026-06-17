@@ -552,42 +552,52 @@ if mode == "📷 Image Upload":
 elif mode == "🎥 Live Cam":
     
     st.markdown('<div class="upload-container">', unsafe_allow_html=True)
-    st.header("🎥 Live Mosquito Detection")
-    st.write("Point your camera and capture. Detection runs instantly on each capture.")
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown("""
+        <div style="text-align:center; padding:1rem 0;">
+            <h2 style="margin:0;">🎥 Live Detection</h2>
+            <p style="margin:0.5rem 0; opacity:0.8;">Camera shows live preview. Each capture runs instant detection.</p>
+        </div>
+    """, unsafe_allow_html=True)
     
-    live_img = st.camera_input("Capture", key=f"cam_{st.session_state.cam_key}")
+    # Display last result if available
+    if st.session_state.cam_key > 0 and 'last_result' in st.session_state:
+        st.image(st.session_state.last_result, use_container_width=True)
+        if 'last_count' in st.session_state and st.session_state.last_count > 0:
+            play_beep()
+    
+    # Always show fresh camera
+    live_img = st.camera_input("", key=f"cam_{st.session_state.cam_key}")
     
     if live_img is not None:
         image = Image.open(live_img)
         img_array = np.array(image)
         
-        with st.spinner("🔍 Detecting..."):
-            results = model(img_array, conf=confidence_threshold)
-            annotated = results[0].plot()
-            count = len(results[0].boxes)
+        results = model(img_array, conf=confidence_threshold)
+        annotated = results[0].plot()
+        count = len(results[0].boxes)
         
-        st.image(annotated, use_container_width=True)
+        st.session_state.last_result = annotated
+        st.session_state.last_count = count
         
         if count > 0:
-            play_beep()
             st.markdown(f"""
-            <div class="success-box">
-                <h2 style="margin: 0;">🦟 Mosquitoes Detected: <strong>{count}</strong></h2>
+            <div class="success-box" style="padding:0.8rem;">
+                <h3 style="margin:0;">🦟 {count} detected</h3>
             </div>
             """, unsafe_allow_html=True)
-            confs = results[0].boxes.conf.cpu().numpy()
-            st.metric("Avg Confidence", f"{(confs.mean() * 100):.1f}%")
         else:
             st.markdown("""
-            <div class="info-box">
-                <h2 style="margin: 0;">✅ No Mosquitoes</h2>
+            <div class="info-box" style="padding:0.8rem;">
+                <p style="margin:0;">✅ Clear</p>
             </div>
             """, unsafe_allow_html=True)
         
-        if st.button("🔄 Capture Again", use_container_width=True):
-            st.session_state.cam_key += 1
-            st.rerun()
+        st.session_state.cam_key += 1
+        time.sleep(0.3)
+        st.rerun()
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+    st.caption("💡 The camera re-opens automatically after each capture. Just keep tapping to scan rapidly.")
 
 elif mode == "📸 Camera":
     
