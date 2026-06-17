@@ -8,6 +8,13 @@ import numpy as np
 from datetime import datetime
 import io
 
+try:
+    import av
+    from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, WebRtcMode
+    WEBRTC_AVAILABLE = True
+except ImportError:
+    WEBRTC_AVAILABLE = False
+
 # Initialize session state for dark mode
 if 'dark_mode' not in st.session_state:
     st.session_state.dark_mode = True
@@ -549,53 +556,65 @@ elif mode == "🎥 Live Cam":
     
     st.markdown('<div class="upload-container">', unsafe_allow_html=True)
     st.header("🎥 Live Mosquito Detection")
-    st.write("Capture real-time photos from your camera for detection")
+    st.write("Real-time mosquito detection using your webcam")
     st.markdown('</div>', unsafe_allow_html=True)
     
-    if 'capture_count' not in st.session_state:
-        st.session_state.capture_count = 0
-    
-    camera_image = st.camera_input("Take a photo", key=f"live_cam_{st.session_state.capture_count}")
-    
-    if camera_image is not None:
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.subheader("📷 Captured")
-            image = Image.open(camera_image)
-            st.image(image, caption="Captured Image", use_container_width=True)
-        
-        with col2:
-            st.subheader("🔍 Detection Result")
-            
-            with st.spinner("🔄 Analyzing..."):
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
-                    image.save(tmp.name)
-                    results = model(tmp.name, conf=confidence_threshold)
-                    annotated = results[0].plot()
-                    count = len(results[0].boxes)
-            
-            st.image(annotated, caption="Detection Result", use_container_width=True)
-        
-        if count > 0:
-            st.markdown(f"""
-            <div class="success-box">
-                <h2 style="margin: 0;">✅ Detection Complete</h2>
-                <p style="font-size: 1.5rem; margin: 0.5rem 0;">Mosquitoes Detected: <strong>{count}</strong></p>
-            </div>
-            """, unsafe_allow_html=True)
-        else:
-            st.markdown("""
-            <div class="info-box">
-                <h2 style="margin: 0;">ℹ️ No Mosquitoes Detected</h2>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        if st.button("🔄 Take Another Photo"):
-            st.session_state.capture_count += 1
-            st.rerun()
+    if not WEBRTC_AVAILABLE:
+        st.markdown("""
+        <div class="warning-box">
+            <h2 style="margin: 0;">⚠️ Webcam Mode Not Available</h2>
+            <p style="margin: 0.5rem 0;">Required packages not installed.</p>
+        </div>
+        """, unsafe_allow_html=True)
     else:
-        st.info("👆 Take a photo to begin detection")
+        try:
+            class VideoProcessor(VideoProcessorBase):
+                def __init__(self):
+                    super().__init__()
+                    self.detection_count = 0
+                    self.frame_count = 0
+                
+                def recv(self, frame):
+                    try:
+                        img = frame.to_ndarray(format="bgr24")
+                        results = model(img, verbose=False)
+                        count = len(results[0].boxes)
+                        self.detection_count = count
+                        self.frame_count += 1
+                        annotated = results[0].plot()
+                        return av.VideoFrame.from_ndarray(annotated, format="bgr24")
+                    except Exception as e:
+                        print(f"Error in video processing: {e}")
+                        import traceback
+                        traceback.print_exc()
+                        return frame
+            
+            rtc_config = {
+                "iceServers": [
+                    {"urls": ["stun:stun.l.google.com:19302"]},
+                    {"urls": ["turn:freeturn.net:3478"], "username": "free", "credential": "free"}
+                ]
+            }
+            
+            webrtc_ctx = webrtc_streamer(
+                key="mosquito-camera",
+                video_processor_factory=VideoProcessor,
+                media_stream_constraints={"video": True, "audio": False},
+                rtc_configuration=rtc_config,
+                mode=WebRtcMode.SENDRECV
+            )
+            
+            if webrtc_ctx.state.playing:
+                st.markdown("""
+                <div class="info-box">
+                    <p style="font-size: 1.1rem;">🎥 Camera is active. Detection running in real-time.</p>
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.warning("⚠️ Click 'Start' to begin live detection")
+                
+        except Exception as e:
+            st.error(f"⚠️ Webcam Error: {str(e)}")
 
 elif mode == "📸 Camera":
     
